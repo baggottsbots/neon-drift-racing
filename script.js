@@ -5,12 +5,9 @@
   let W = 0, H = 0, DPR = 1;
   function resize() {
     DPR = Math.min(window.devicePixelRatio || 1, 2);
-    W = window.innerWidth;
-    H = window.innerHeight;
-    canvas.width = W * DPR;
-    canvas.height = H * DPR;
-    canvas.style.width = W + 'px';
-    canvas.style.height = H + 'px';
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * DPR; canvas.height = H * DPR;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   }
   window.addEventListener('resize', resize);
@@ -59,30 +56,28 @@
   function initStars() {
     state.stars = [];
     for (let i = 0; i < 120; i++) {
-      state.stars.push({
-        x: Math.random(), y: Math.random() * 0.55,
-        s: Math.random() * 1.8 + 0.3, tw: Math.random() * Math.PI * 2,
-        c: Math.random() > 0.7 ? COLORS.sun2 : '#fff',
-      });
+      state.stars.push({ x: Math.random(), y: Math.random() * 0.55, s: Math.random() * 1.8 + 0.3, tw: Math.random() * Math.PI * 2, c: Math.random() > 0.7 ? COLORS.sun2 : '#fff' });
     }
     state.mountains = [];
     for (let i = 0; i < 16; i++) {
-      state.mountains.push({
-        x: Math.random(), w: 0.12 + Math.random() * 0.22,
-        h: 0.08 + Math.random() * 0.18, layer: Math.floor(Math.random() * 3),
-      });
+      state.mountains.push({ x: Math.random(), w: 0.12 + Math.random() * 0.22, h: 0.08 + Math.random() * 0.18, layer: Math.floor(Math.random() * 3) });
     }
   }
   initStars();
+
+  // Spawn enemy in a lane the player is not currently in, so you don't get hit before you can react
   function spawnEnemy() {
-    const laneIdx = Math.floor(Math.random() * 3) - 1;
     const colors = [COLORS.enemy1, COLORS.enemy2, COLORS.enemy3];
     const c = colors[Math.floor(Math.random() * colors.length)];
+    // Pick a lane away from the player's current lane when possible
+    const playerLane = state.playerX < -0.25 ? -1 : (state.playerX > 0.25 ? 1 : 0);
+    const choices = [-1, 0, 1].filter(l => l !== playerLane);
+    const laneIdx = choices[Math.floor(Math.random() * choices.length)];
     state.enemies.push({
       z: state.distance + 3200 + Math.random() * 800,
       x: laneIdx * 0.65, lane: laneIdx, color: c,
       speed: 0.15 + Math.random() * 0.08,
-      type: Math.random() < 0.3 ? 'truck' : 'car', hit: false,
+      type: Math.random() < 0.3 ? 'truck' : 'car', hit: false, passed: false,
     });
   }
   function spawnItem() {
@@ -181,19 +176,9 @@
   const overScreen = document.getElementById('overScreen');
   const countdownEl = document.getElementById('countdown');
   document.getElementById('hiScoreVal').textContent = state.hiScore.toLocaleString();
-  document.getElementById('startBtn').addEventListener('click', () => {
-    startScreen.classList.add('hidden');
-    startCountdown();
-  });
-  document.getElementById('retryBtn').addEventListener('click', () => {
-    overScreen.classList.add('hidden');
-    resetGame(); startCountdown();
-  });
-  document.getElementById('menuBtn').addEventListener('click', () => {
-    overScreen.classList.add('hidden');
-    startScreen.classList.remove('hidden');
-    resetGame();
-  });
+  document.getElementById('startBtn').addEventListener('click', () => { startScreen.classList.add('hidden'); startCountdown(); });
+  document.getElementById('retryBtn').addEventListener('click', () => { overScreen.classList.add('hidden'); resetGame(); startCountdown(); });
+  document.getElementById('menuBtn').addEventListener('click', () => { overScreen.classList.add('hidden'); startScreen.classList.remove('hidden'); resetGame(); });
   function resetGame() {
     state.score = 0; state.speed = 0; state.maxSpeed = 0;
     state.targetSpeed = state.baseSpeed;
@@ -292,13 +277,17 @@
         spawnItem();
         state.itemTimer = 2.5 + Math.random() * 2;
       }
+      // Collision: compare lane-space positions directly (road curve bends both player and enemy the same way, so it cancels out in lane space)
+      // Hit zone tightened: 0.28 lane units wide, 0.14 z window (roughly the length of one car)
+      const HIT_DX = 0.28;
       for (let i = state.enemies.length - 1; i >= 0; i--) {
         const e = state.enemies[i];
         e.z -= e.speed * 60 * dt * 16;
         const rel = e.z - state.distance;
-        if (rel < -800) {
+        if (rel < -400) {
           state.enemies.splice(i, 1);
-          if (!e.hit) {
+          if (!e.hit && !e.passed) {
+            e.passed = true;
             state.combo++;
             state.comboTimer = 2.5;
             if (state.combo > state.bestCombo) state.bestCombo = state.combo;
@@ -309,9 +298,10 @@
           }
           continue;
         }
-        if (!e.hit && rel > -150 && rel < 250) {
+        // Hit test only while enemy overlaps the player's z position (near z=0, one car length deep/ahead)
+        if (!e.hit && rel > -80 && rel < 120) {
           const dx = Math.abs(state.playerX - e.x);
-          if (dx < 0.38) { e.hit = true; crash(); }
+          if (dx < HIT_DX) { e.hit = true; crash(); }
         }
       }
       for (let i = state.items.length - 1; i >= 0; i--) {
@@ -319,9 +309,9 @@
         const rel = it.z - state.distance;
         it.rot += dt * 4;
         if (rel < -400) { state.items.splice(i, 1); continue; }
-        if (!it.collected && rel > -150 && rel < 250) {
+        if (!it.collected && rel > -80 && rel < 120) {
           const dx = Math.abs(state.playerX - it.x);
-          if (dx < 0.35) {
+          if (dx < 0.28) {
             it.collected = true;
             if (it.type === 'coin') {
               state.score += 100;
@@ -381,16 +371,12 @@
     }
     const horizon = H * 0.55;
     const sky = ctx.createLinearGradient(0, 0, 0, horizon);
-    sky.addColorStop(0, '#05020f');
-    sky.addColorStop(0.4, '#0a0420');
-    sky.addColorStop(0.7, '#1a0838');
-    sky.addColorStop(1, '#3d0a5a');
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, W, horizon);
+    sky.addColorStop(0, '#05020f'); sky.addColorStop(0.4, '#0a0420');
+    sky.addColorStop(0.7, '#1a0838'); sky.addColorStop(1, '#3d0a5a');
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, horizon);
     for (const s of state.stars) {
       const tw = Math.sin(state.t * 2 + s.tw) * 0.4 + 0.6;
-      ctx.fillStyle = s.c;
-      ctx.globalAlpha = tw * 0.9;
+      ctx.fillStyle = s.c; ctx.globalAlpha = tw * 0.9;
       ctx.fillRect(s.x * W, s.y * horizon, s.s, s.s);
     }
     ctx.globalAlpha = 1;
@@ -398,13 +384,9 @@
     const sunY = horizon - H * 0.18;
     const sunR = H * 0.12;
     const sunGrad = ctx.createLinearGradient(0, sunY - sunR, 0, sunY + sunR);
-    sunGrad.addColorStop(0, COLORS.sun1);
-    sunGrad.addColorStop(0.5, COLORS.sun2);
-    sunGrad.addColorStop(1, COLORS.sun3);
+    sunGrad.addColorStop(0, COLORS.sun1); sunGrad.addColorStop(0.5, COLORS.sun2); sunGrad.addColorStop(1, COLORS.sun3);
     ctx.fillStyle = sunGrad;
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#05020f';
     for (let i = 0; i < 6; i++) {
       const stripeY = sunY + (i * 3.5) + i * 2;
@@ -414,20 +396,16 @@
       }
     }
     const glow = ctx.createRadialGradient(sunX, sunY, sunR * 0.8, sunX, sunY, sunR * 3);
-    glow.addColorStop(0, 'rgba(255, 77, 178, 0.35)');
-    glow.addColorStop(1, 'rgba(255, 77, 178, 0)');
+    glow.addColorStop(0, 'rgba(255, 77, 178, 0.35)'); glow.addColorStop(1, 'rgba(255, 77, 178, 0)');
     ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(sunX, sunY, sunR * 3, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(sunX, sunY, sunR * 3, 0, Math.PI * 2); ctx.fill();
     for (let layer = 2; layer >= 0; layer--) {
       const layerMts = state.mountains.filter(m => m.layer === layer);
       const parallax = (layer + 1) * 0.05;
       const offset = (state.distance * parallax * 0.0008) % 1;
       ctx.fillStyle = layer === 0 ? '#1e0a4a' : layer === 1 ? '#2a0e5e' : '#3d1470';
       ctx.globalAlpha = 0.6 + layer * 0.15;
-      ctx.beginPath();
-      ctx.moveTo(0, horizon);
+      ctx.beginPath(); ctx.moveTo(0, horizon);
       for (const m of layerMts) {
         const mx = ((m.x - offset + state.curve * parallax * 2) % 1 + 1) % 1;
         const px = mx * W;
@@ -436,19 +414,15 @@
         ctx.lineTo(px, horizon - mh);
         ctx.lineTo(px + m.w * W * 0.5, horizon);
       }
-      ctx.lineTo(W, horizon);
-      ctx.closePath();
-      ctx.fill();
+      ctx.lineTo(W, horizon); ctx.closePath(); ctx.fill();
     }
     ctx.globalAlpha = 1;
     const horizonGrad = ctx.createLinearGradient(0, horizon - 2, 0, horizon + 4);
     horizonGrad.addColorStop(0, 'rgba(255, 77, 178, 0)');
     horizonGrad.addColorStop(0.5, '#ff4db2');
     horizonGrad.addColorStop(1, 'rgba(255, 77, 178, 0)');
-    ctx.fillStyle = horizonGrad;
-    ctx.fillRect(0, horizon - 2, W, 6);
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, horizon - 0.5, W, 1);
+    ctx.fillStyle = horizonGrad; ctx.fillRect(0, horizon - 2, W, 6);
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, horizon - 0.5, W, 1);
     drawGroundGrid(horizon);
     drawRoad(horizon);
     drawObjects(horizon);
@@ -456,8 +430,7 @@
     fog.addColorStop(0, 'rgba(255, 77, 178, 0)');
     fog.addColorStop(0.3, 'rgba(255, 77, 178, 0.15)');
     fog.addColorStop(1, 'rgba(255, 77, 178, 0)');
-    ctx.fillStyle = fog;
-    ctx.fillRect(0, horizon - 20, W, 80);
+    ctx.fillStyle = fog; ctx.fillRect(0, horizon - 20, W, 80);
     if (state.boostActive) {
       ctx.strokeStyle = 'rgba(255, 235, 77, 0.6)';
       ctx.lineWidth = 2;
@@ -466,37 +439,27 @@
         const len = 30 + Math.random() * 80;
         const x = Math.random() < 0.5 ? Math.random() * W * 0.3 : W - Math.random() * W * 0.3;
         ctx.globalAlpha = Math.random() * 0.7;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x, y + len);
-        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y + len); ctx.stroke();
       }
       ctx.globalAlpha = 1;
     }
     for (const p of state.particles) {
-      ctx.globalAlpha = p.life;
-      ctx.fillStyle = p.color;
-      ctx.shadowBlur = 12;
-      ctx.shadowColor = p.color;
+      ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+      ctx.shadowBlur = 12; ctx.shadowColor = p.color;
       ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
     }
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
     const vig = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.8);
-    vig.addColorStop(0, 'rgba(0,0,0,0)');
-    vig.addColorStop(1, 'rgba(0,0,0,0.55)');
-    ctx.fillStyle = vig;
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalAlpha = 0.04;
-    ctx.fillStyle = '#000';
+    vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+    ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 0.04; ctx.fillStyle = '#000';
     for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
     ctx.globalAlpha = 1;
     ctx.restore();
   }
   function drawGroundGrid(horizon) {
     ctx.strokeStyle = COLORS.grid;
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
     const gridSpacing = 40;
     const offsetY = state.roadOffset * 0.8;
     for (let i = 1; i < 30; i++) {
@@ -507,20 +470,14 @@
       const alpha = Math.max(0, 1 - (i / 25));
       ctx.globalAlpha = alpha * 0.5;
       ctx.strokeStyle = COLORS.grid;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(W, y);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
     }
     ctx.globalAlpha = 0.35;
     const vp = W / 2 - state.curve * W * 0.4;
     for (let i = -8; i <= 8; i++) {
       if (i === 0) continue;
       const startX = W / 2 + i * (W / 6);
-      ctx.beginPath();
-      ctx.moveTo(startX, H);
-      ctx.lineTo(vp + i * 12, horizon);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(startX, H); ctx.lineTo(vp + i * 12, horizon); ctx.stroke();
     }
     ctx.globalAlpha = 1;
   }
@@ -554,32 +511,22 @@
       const edgeColor2 = (segIdx % 2 === 0) ? '#ff4db2' : COLORS.roadEdge;
       ctx.fillStyle = edgeColor1;
       ctx.beginPath();
-      ctx.moveTo(cx1 - roadW1 - 14, clampedY1);
-      ctx.lineTo(cx1 - roadW1, clampedY1);
-      ctx.lineTo(cx2 - roadW2, clampedY2);
-      ctx.lineTo(cx2 - roadW2 - 6, clampedY2);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(cx1 - roadW1 - 14, clampedY1); ctx.lineTo(cx1 - roadW1, clampedY1);
+      ctx.lineTo(cx2 - roadW2, clampedY2); ctx.lineTo(cx2 - roadW2 - 6, clampedY2);
+      ctx.closePath(); ctx.fill();
       ctx.fillStyle = edgeColor2;
       ctx.beginPath();
-      ctx.moveTo(cx1 + roadW1, clampedY1);
-      ctx.lineTo(cx1 + roadW1 + 14, clampedY1);
-      ctx.lineTo(cx2 + roadW2 + 6, clampedY2);
-      ctx.lineTo(cx2 + roadW2, clampedY2);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(cx1 + roadW1, clampedY1); ctx.lineTo(cx1 + roadW1 + 14, clampedY1);
+      ctx.lineTo(cx2 + roadW2 + 6, clampedY2); ctx.lineTo(cx2 + roadW2, clampedY2);
+      ctx.closePath(); ctx.fill();
       const roadShade = (segIdx % 2 === 0) ? '#1a0838' : '#150630';
       ctx.fillStyle = roadShade;
       ctx.beginPath();
-      ctx.moveTo(cx1 - roadW1, clampedY1);
-      ctx.lineTo(cx1 + roadW1, clampedY1);
-      ctx.lineTo(cx2 + roadW2, clampedY2);
-      ctx.lineTo(cx2 - roadW2, clampedY2);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(cx1 - roadW1, clampedY1); ctx.lineTo(cx1 + roadW1, clampedY1);
+      ctx.lineTo(cx2 + roadW2, clampedY2); ctx.lineTo(cx2 - roadW2, clampedY2);
+      ctx.closePath(); ctx.fill();
       if (segIdx % 3 === 0) {
-        ctx.fillStyle = '#fff';
-        ctx.globalAlpha = 0.85;
+        ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.85;
         const laneW1 = roadW1 * 0.03;
         const laneW2 = roadW2 * 0.03;
         for (const offset of [-0.33, 0.33]) {
@@ -588,29 +535,46 @@
           ctx.lineTo(cx1 + offset * roadW1 * 2 + laneW1, clampedY1);
           ctx.lineTo(cx2 + offset * roadW2 * 2 + laneW2, clampedY2);
           ctx.lineTo(cx2 + offset * roadW2 * 2 - laneW2, clampedY2);
-          ctx.closePath();
-          ctx.fill();
+          ctx.closePath(); ctx.fill();
         }
         ctx.globalAlpha = 1;
       }
       maxY = clampedY2;
       if (clampedY2 <= horizon) break;
     }
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = COLORS.roadEdge;
+    ctx.shadowBlur = 12; ctx.shadowColor = COLORS.roadEdge;
     ctx.strokeStyle = 'rgba(54, 214, 181, 0.5)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(W / 2 - 10, horizon);
-    ctx.lineTo(0, H);
-    ctx.moveTo(W / 2 + 10, horizon);
-    ctx.lineTo(W, H);
+    ctx.moveTo(W / 2 - 10, horizon); ctx.lineTo(0, H);
+    ctx.moveTo(W / 2 + 10, horizon); ctx.lineTo(W, H);
     ctx.stroke();
     ctx.shadowBlur = 0;
   }
-  function drawObjects(horizon) {
+  // Fixed: projectObject now walks the curve the SAME way drawRoad does,
+  // so enemy/item on-screen position matches the road. Previously it used
+  // a broken accumulation that misaligned objects on curves.
+  function projectObject(worldZ) {
     const cameraZ = state.distance;
     const playerSegIdx = Math.floor(cameraZ / SEGMENT_LENGTH);
+    const dz = worldZ - cameraZ;
+    if (dz < 1) return null;
+    // Walk segments from camera out to the object's segment, accumulating curve dx
+    const targetSegIdx = Math.floor(worldZ / SEGMENT_LENGTH);
+    const numSegs = targetSegIdx - playerSegIdx;
+    let x = 0, dx = 0;
+    const limit = Math.min(numSegs, DRAW_DISTANCE);
+    for (let n = 0; n < limit; n++) {
+      const segIdx = (playerSegIdx + n) % segments.length;
+      x += dx;
+      dx += segments[segIdx].curve;
+    }
+    const scale = CAMERA_DEPTH / dz;
+    // Note: screenX below needs the object's worldX added by the caller
+    return { curveX: x, scale, playerSegIdx };
+  }
+  function drawObjects(horizon) {
+    const cameraZ = state.distance;
     const drawables = [];
     for (const e of state.enemies) {
       const z = e.z - cameraZ;
@@ -622,28 +586,16 @@
     }
     drawables.push({ type: 'player', z: 0, obj: null });
     drawables.sort((a, b) => b.z - a.z);
-    function projectObject(worldZ, worldX) {
-      let x = 0, dx = 0;
-      const segs = Math.floor(worldZ / SEGMENT_LENGTH);
-      for (let n = 0; n < segs && n < DRAW_DISTANCE; n++) {
-        const segIdx = (playerSegIdx + n) % segments.length;
-        x += dx; dx += segments[segIdx].curve;
-      }
-      const scale = CAMERA_DEPTH / Math.max(1, worldZ);
-      const screenX = W / 2 + (x + worldX * 200 - state.playerX * 200) * scale * W * 0.5 / CAMERA_DEPTH;
-      const screenY = H / 2 - scale * (-800) * H / 2;
-      const sizeScale = scale * W * 0.5;
-      return { x: screenX, y: Math.min(H, screenY), scale: sizeScale };
-    }
     for (const d of drawables) {
-      if (d.type === 'player') drawPlayer();
-      else if (d.type === 'enemy') {
-        const p = projectObject(d.z, d.obj.x);
-        drawEnemy(p.x, p.y, p.scale, d.obj);
-      } else if (d.type === 'item') {
-        const p = projectObject(d.z, d.obj.x);
-        drawItem(p.x, p.y, p.scale, d.obj);
-      }
+      if (d.type === 'player') { drawPlayer(); continue; }
+      const proj = projectObject(d.obj.z);
+      if (!proj) continue;
+      const screenX = W / 2 + (proj.curveX + d.obj.x * 200 - state.playerX * 200) * proj.scale * W * 0.5 / CAMERA_DEPTH;
+      const screenY = H / 2 - proj.scale * (-800) * H / 2;
+      const py = Math.min(H, screenY);
+      const sizeScale = proj.scale * W * 0.5;
+      if (d.type === 'enemy') drawEnemy(screenX, py, sizeScale, d.obj);
+      else drawItem(screenX, py, sizeScale, d.obj);
     }
   }
   function drawPlayer() {
@@ -657,9 +609,7 @@
     ctx.rotate(tilt);
     ctx.scale(scale, scale);
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.beginPath();
-    ctx.ellipse(0, 34, 48, 10, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 34, 48, 10, 0, 0, Math.PI * 2); ctx.fill();
     const underglow = ctx.createRadialGradient(0, 32, 0, 0, 32, 70);
     const glowColor = state.boostActive ? COLORS.sun1 : COLORS.playerBody;
     underglow.addColorStop(0, glowColor + 'dd');
@@ -670,88 +620,53 @@
     if (state.boostActive) {
       const flameLen = 20 + Math.random() * 8;
       ctx.fillStyle = COLORS.sun1;
-      ctx.shadowBlur = 20;
-      ctx.shadowColor = COLORS.sun1;
-      ctx.beginPath();
-      ctx.moveTo(-20, 28); ctx.lineTo(-12, 28 + flameLen); ctx.lineTo(-4, 28);
-      ctx.closePath(); ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(4, 28); ctx.lineTo(12, 28 + flameLen); ctx.lineTo(20, 28);
-      ctx.closePath(); ctx.fill();
+      ctx.shadowBlur = 20; ctx.shadowColor = COLORS.sun1;
+      ctx.beginPath(); ctx.moveTo(-20, 28); ctx.lineTo(-12, 28 + flameLen); ctx.lineTo(-4, 28); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(4, 28); ctx.lineTo(12, 28 + flameLen); ctx.lineTo(20, 28); ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.moveTo(-16, 28); ctx.lineTo(-12, 28 + flameLen * 0.6); ctx.lineTo(-8, 28);
-      ctx.closePath(); ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(8, 28); ctx.lineTo(12, 28 + flameLen * 0.6); ctx.lineTo(16, 28);
-      ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-16, 28); ctx.lineTo(-12, 28 + flameLen * 0.6); ctx.lineTo(-8, 28); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(8, 28); ctx.lineTo(12, 28 + flameLen * 0.6); ctx.lineTo(16, 28); ctx.closePath(); ctx.fill();
       ctx.shadowBlur = 0;
     }
     const bodyGrad = ctx.createLinearGradient(0, -30, 0, 30);
-    bodyGrad.addColorStop(0, '#0a1a2e');
-    bodyGrad.addColorStop(0.5, COLORS.playerBody);
-    bodyGrad.addColorStop(1, '#0a1a2e');
-    ctx.shadowBlur = 16;
-    ctx.shadowColor = COLORS.playerBody;
+    bodyGrad.addColorStop(0, '#0a1a2e'); bodyGrad.addColorStop(0.5, COLORS.playerBody); bodyGrad.addColorStop(1, '#0a1a2e');
+    ctx.shadowBlur = 16; ctx.shadowColor = COLORS.playerBody;
     ctx.fillStyle = bodyGrad;
     ctx.beginPath();
-    ctx.moveTo(0, -36);
-    ctx.lineTo(-14, -20);
-    ctx.lineTo(-26, 8);
-    ctx.lineTo(-30, 20);
-    ctx.lineTo(-22, 30);
-    ctx.lineTo(22, 30);
-    ctx.lineTo(30, 20);
-    ctx.lineTo(26, 8);
-    ctx.lineTo(14, -20);
-    ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(0, -36); ctx.lineTo(-14, -20); ctx.lineTo(-26, 8); ctx.lineTo(-30, 20);
+    ctx.lineTo(-22, 30); ctx.lineTo(22, 30); ctx.lineTo(30, 20); ctx.lineTo(26, 8); ctx.lineTo(14, -20);
+    ctx.closePath(); ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = '#4dffd9';
-    ctx.lineWidth = 2;
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#4dffd9';
+    ctx.strokeStyle = '#4dffd9'; ctx.lineWidth = 2;
+    ctx.shadowBlur = 10; ctx.shadowColor = '#4dffd9';
     ctx.beginPath();
     ctx.moveTo(-26, 8); ctx.lineTo(-30, 20); ctx.lineTo(-22, 30);
     ctx.moveTo(22, 30); ctx.lineTo(30, 20); ctx.lineTo(26, 8);
     ctx.stroke();
     ctx.shadowBlur = 0;
     const cockpit = ctx.createLinearGradient(0, -26, 0, 6);
-    cockpit.addColorStop(0, '#ff4db2');
-    cockpit.addColorStop(0.5, '#9d4dff');
-    cockpit.addColorStop(1, '#1a0838');
+    cockpit.addColorStop(0, '#ff4db2'); cockpit.addColorStop(0.5, '#9d4dff'); cockpit.addColorStop(1, '#1a0838');
     ctx.fillStyle = cockpit;
     ctx.beginPath();
-    ctx.moveTo(0, -28); ctx.lineTo(-10, -12);
-    ctx.lineTo(-14, 8); ctx.lineTo(14, 8);
-    ctx.lineTo(10, -12);
-    ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(0, -28); ctx.lineTo(-10, -12); ctx.lineTo(-14, 8); ctx.lineTo(14, 8); ctx.lineTo(10, -12);
+    ctx.closePath(); ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     ctx.beginPath();
-    ctx.moveTo(-4, -22); ctx.lineTo(-8, -8);
-    ctx.lineTo(4, -8); ctx.lineTo(0, -22);
-    ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(-4, -22); ctx.lineTo(-8, -8); ctx.lineTo(4, -8); ctx.lineTo(0, -22);
+    ctx.closePath(); ctx.fill();
     ctx.fillStyle = '#ff4db2';
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = '#ff4db2';
+    ctx.shadowBlur = 8; ctx.shadowColor = '#ff4db2';
     ctx.fillRect(-1.5, -30, 3, 18);
     ctx.shadowBlur = 0;
     ctx.fillStyle = '#ff4db2';
-    ctx.shadowBlur = 14;
-    ctx.shadowColor = '#ff4db2';
-    ctx.fillRect(-26, 24, 8, 4);
-    ctx.fillRect(18, 24, 8, 4);
+    ctx.shadowBlur = 14; ctx.shadowColor = '#ff4db2';
+    ctx.fillRect(-26, 24, 8, 4); ctx.fillRect(18, 24, 8, 4);
     ctx.shadowBlur = 0;
     ctx.fillStyle = '#fff';
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = '#fff';
-    ctx.fillRect(-10, -34, 4, 3);
-    ctx.fillRect(6, -34, 4, 3);
+    ctx.shadowBlur = 10; ctx.shadowColor = '#fff';
+    ctx.fillRect(-10, -34, 4, 3); ctx.fillRect(6, -34, 4, 3);
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(-20, 12); ctx.lineTo(-16, 18);
     ctx.moveTo(-20, 16); ctx.lineTo(-16, 22);
@@ -764,67 +679,46 @@
     if (px < -100 || px > W + 100 || py > H + 50) return;
     const s = Math.min(1, scale * 0.015);
     if (s < 0.05) return;
-    const w = 52 * s;
-    const h = 66 * s;
+    const w = 52 * s; const h = 66 * s;
     const yOffset = py - h * 0.3;
-    ctx.save();
-    ctx.translate(px, yOffset);
+    ctx.save(); ctx.translate(px, yOffset);
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.beginPath();
-    ctx.ellipse(0, h * 0.5, w * 0.9, h * 0.15, 0, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, h * 0.5, w * 0.9, h * 0.15, 0, 0, Math.PI * 2); ctx.fill();
     if (s > 0.2) {
       const under = ctx.createRadialGradient(0, h * 0.4, 0, 0, h * 0.4, w * 1.3);
-      under.addColorStop(0, e.color + 'bb');
-      under.addColorStop(1, e.color + '00');
+      under.addColorStop(0, e.color + 'bb'); under.addColorStop(1, e.color + '00');
       ctx.fillStyle = under;
       ctx.fillRect(-w * 1.4, -h * 0.2, w * 2.8, h * 1.2);
     }
-    ctx.shadowBlur = s > 0.3 ? 12 : 6;
-    ctx.shadowColor = e.color;
+    ctx.shadowBlur = s > 0.3 ? 12 : 6; ctx.shadowColor = e.color;
     const body = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
-    body.addColorStop(0, '#0a0420');
-    body.addColorStop(0.5, e.color);
-    body.addColorStop(1, '#0a0420');
+    body.addColorStop(0, '#0a0420'); body.addColorStop(0.5, e.color); body.addColorStop(1, '#0a0420');
     ctx.fillStyle = body;
     if (e.type === 'truck') {
       ctx.fillRect(-w * 0.55, -h * 0.5, w * 1.1, h);
     } else {
       ctx.beginPath();
-      ctx.moveTo(0, -h * 0.5);
-      ctx.lineTo(-w * 0.4, -h * 0.2);
-      ctx.lineTo(-w * 0.5, h * 0.3);
-      ctx.lineTo(-w * 0.4, h * 0.5);
-      ctx.lineTo(w * 0.4, h * 0.5);
-      ctx.lineTo(w * 0.5, h * 0.3);
+      ctx.moveTo(0, -h * 0.5); ctx.lineTo(-w * 0.4, -h * 0.2);
+      ctx.lineTo(-w * 0.5, h * 0.3); ctx.lineTo(-w * 0.4, h * 0.5);
+      ctx.lineTo(w * 0.4, h * 0.5); ctx.lineTo(w * 0.5, h * 0.3);
       ctx.lineTo(w * 0.4, -h * 0.2);
-      ctx.closePath();
-      ctx.fill();
+      ctx.closePath(); ctx.fill();
     }
     ctx.shadowBlur = 0;
     if (s > 0.15) {
       ctx.fillStyle = '#fff';
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = '#fff';
+      ctx.shadowBlur = 8; ctx.shadowColor = '#fff';
       ctx.fillRect(-w * 0.35, -h * 0.52, w * 0.18, 3);
       ctx.fillRect(w * 0.18, -h * 0.52, w * 0.18, 3);
       ctx.shadowBlur = 0;
       ctx.fillStyle = 'rgba(77, 255, 217, 0.35)';
       ctx.beginPath();
-      ctx.moveTo(-w * 0.3, -h * 0.15);
-      ctx.lineTo(w * 0.3, -h * 0.15);
-      ctx.lineTo(w * 0.25, h * 0.1);
-      ctx.lineTo(-w * 0.25, h * 0.1);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = e.color;
-      ctx.lineWidth = 1.5;
-      ctx.shadowBlur = 6;
-      ctx.shadowColor = e.color;
-      ctx.beginPath();
-      ctx.moveTo(-w * 0.5, h * 0.3);
-      ctx.lineTo(w * 0.5, h * 0.3);
-      ctx.stroke();
+      ctx.moveTo(-w * 0.3, -h * 0.15); ctx.lineTo(w * 0.3, -h * 0.15);
+      ctx.lineTo(w * 0.25, h * 0.1); ctx.lineTo(-w * 0.25, h * 0.1);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = e.color; ctx.lineWidth = 1.5;
+      ctx.shadowBlur = 6; ctx.shadowColor = e.color;
+      ctx.beginPath(); ctx.moveTo(-w * 0.5, h * 0.3); ctx.lineTo(w * 0.5, h * 0.3); ctx.stroke();
       ctx.shadowBlur = 0;
     }
     ctx.restore();
@@ -834,50 +728,32 @@
     const s = Math.min(1, scale * 0.012);
     if (s < 0.04) return;
     const size = 22 * s;
-    ctx.save();
-    ctx.translate(px, py - size);
+    ctx.save(); ctx.translate(px, py - size);
     if (it.type === 'coin') {
       const squish = Math.abs(Math.cos(it.rot));
       ctx.fillStyle = COLORS.sun1;
-      ctx.shadowBlur = 20 * s;
-      ctx.shadowColor = COLORS.sun1;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, size, size * (0.2 + squish * 0.8), 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.globalAlpha = 0.4;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, size * 0.6, size * (0.1 + squish * 0.5), 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.shadowBlur = 0;
+      ctx.shadowBlur = 20 * s; ctx.shadowColor = COLORS.sun1;
+      ctx.beginPath(); ctx.ellipse(0, 0, size, size * (0.2 + squish * 0.8), 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.4;
+      ctx.beginPath(); ctx.ellipse(0, 0, size * 0.6, size * (0.1 + squish * 0.5), 0, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1; ctx.shadowBlur = 0;
     } else {
-      ctx.shadowBlur = 20 * s;
-      ctx.shadowColor = COLORS.enemy1;
+      ctx.shadowBlur = 20 * s; ctx.shadowColor = COLORS.enemy1;
       ctx.fillStyle = COLORS.enemy1;
       const hover = Math.sin(it.rot * 2) * 3 * s;
       ctx.translate(0, hover);
       ctx.beginPath();
-      ctx.moveTo(-size * 0.3, -size);
-      ctx.lineTo(size * 0.3, -size * 0.2);
-      ctx.lineTo(-size * 0.1, -size * 0.2);
-      ctx.lineTo(size * 0.3, size);
-      ctx.lineTo(-size * 0.1, size * 0.2);
-      ctx.lineTo(-size * 0.3, size * 0.2);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(-size * 0.3, -size); ctx.lineTo(size * 0.3, -size * 0.2);
+      ctx.lineTo(-size * 0.1, -size * 0.2); ctx.lineTo(size * 0.3, size);
+      ctx.lineTo(-size * 0.1, size * 0.2); ctx.lineTo(-size * 0.3, size * 0.2);
+      ctx.closePath(); ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.fillStyle = '#fff';
-      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.5;
       ctx.beginPath();
-      ctx.moveTo(-size * 0.15, -size * 0.7);
-      ctx.lineTo(size * 0.15, -size * 0.15);
-      ctx.lineTo(0, -size * 0.15);
-      ctx.lineTo(size * 0.15, size * 0.7);
-      ctx.lineTo(0, size * 0.15);
-      ctx.lineTo(-size * 0.15, size * 0.15);
-      ctx.closePath();
-      ctx.fill();
+      ctx.moveTo(-size * 0.15, -size * 0.7); ctx.lineTo(size * 0.15, -size * 0.15);
+      ctx.lineTo(0, -size * 0.15); ctx.lineTo(size * 0.15, size * 0.7);
+      ctx.lineTo(0, size * 0.15); ctx.lineTo(-size * 0.15, size * 0.15);
+      ctx.closePath(); ctx.fill();
       ctx.globalAlpha = 1;
     }
     ctx.restore();
